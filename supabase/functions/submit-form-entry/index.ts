@@ -1,10 +1,72 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.2";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+// Allowed origins for CORS
+const allowedOrigins = [
+  "https://menorah.jewishtc.org",
+  "https://light-the-way-glow.lovable.app"
+];
+
+function getCorsHeaders(origin: string | null): Record<string, string> {
+  const allowedOrigin = origin && allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
+  return {
+    "Access-Control-Allow-Origin": allowedOrigin,
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  };
+}
+
+// Sanitize sensitive data for logging
+function sanitizeForLog(value: string | null | undefined, showChars: number = 4): string {
+  if (!value) return "[empty]";
+  if (value.length <= showChars * 2) return "[redacted]";
+  return `${value.substring(0, showChars)}...${value.substring(value.length - showChars)}`;
+}
+
+// Rate limiting configuration
+const RATE_LIMIT_WINDOW_SECONDS = 60;
+const RATE_LIMIT_MAX_REQUESTS = 5;
+
+async function checkRateLimit(supabaseUrl: string, serviceKey: string, identifier: string, endpoint: string): Promise<boolean> {
+  try {
+    const supabase = createClient(supabaseUrl, serviceKey);
+    const windowStart = new Date(Date.now() - RATE_LIMIT_WINDOW_SECONDS * 1000).toISOString();
+    
+    // Count recent requests using raw query approach
+    const { data: recentRequests, error: countError } = await supabase
+      .from("rate_limits")
+      .select("request_count")
+      .eq("identifier", identifier)
+      .eq("endpoint", endpoint)
+      .gte("window_start", windowStart);
+    
+    if (countError) {
+      console.error("[rate-limit] Error checking rate limit");
+      return true; // Allow on error to not block legitimate users
+    }
+    
+    // Cast to any to handle dynamic table type
+    const requests = recentRequests as Array<{ request_count: number }> | null;
+    const totalRequests = requests?.reduce((sum, r) => sum + (r.request_count || 1), 0) || 0;
+    
+    if (totalRequests >= RATE_LIMIT_MAX_REQUESTS) {
+      console.log("[rate-limit] Rate limit exceeded", { identifier: sanitizeForLog(identifier), endpoint });
+      return false;
+    }
+    
+    // Record this request
+    await supabase.from("rate_limits").insert({
+      identifier,
+      endpoint,
+      request_count: 1,
+      window_start: new Date().toISOString(),
+    } as Record<string, unknown>);
+    
+    return true;
+  } catch (err) {
+    console.error("[rate-limit] Unexpected error");
+    return true; // Allow on error
+  }
+}
 
 interface SubmitEntryBody {
   full_name: string;
@@ -62,7 +124,7 @@ async function sendRegistrationEmail(fullName: string, email: string): Promise<v
       htmlContent,
     };
 
-    console.log(`[email] Attempting to send registration email to ${email}...`);
+    console.log("[email] Sending registration email", { email: sanitizeForLog(email) });
 
     const response = await fetch("https://api.brevo.com/v3/smtp/email", {
       method: "POST",
@@ -74,18 +136,20 @@ async function sendRegistrationEmail(fullName: string, email: string): Promise<v
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Brevo API error: ${response.status} - ${errorText}`);
+      throw new Error(`Email API error: ${response.status}`);
     }
     
-    console.log(`[email] Sent successfully to ${email}`);
+    console.log("[email] Sent successfully");
   } catch (error) {
-    console.error(`[email] Error: ${error}`);
+    console.error("[email] Send failed");
     // Don't throw - we don't want email failures to block form submission
   }
 }
 
 serve(async (req) => {
+  const origin = req.headers.get("origin");
+  const corsHeaders = getCorsHeaders(origin);
+
   // Handle CORS preflight requests
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -100,6 +164,19 @@ serve(async (req) => {
 
     const body = (await req.json()) as Partial<SubmitEntryBody>;
 
+    // Rate limiting by email
+    if (body.email) {
+      const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+      const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+      const withinLimit = await checkRateLimit(supabaseUrl, serviceKey, body.email.toLowerCase(), "submit-form-entry");
+      if (!withinLimit) {
+        return new Response(
+          JSON.stringify({ error: "Too many requests. Please try again later." }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 429 }
+        );
+      }
+    }
+
     // Minimal validation of required fields
     if (!body.full_name || !body.email || !body.reason || !body.verification_token || !body.verification_sent_at || body.number_of_adults === undefined) {
       return new Response(
@@ -107,6 +184,11 @@ serve(async (req) => {
         { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
       );
     }
+
+    console.log("[submit-form-entry] Processing submission", {
+      email: sanitizeForLog(body.email),
+      wantsToDonate: body.wants_to_donate,
+    });
 
     // Compute full_phone if not provided but parts are
     let full_phone = body.full_phone ?? null;
@@ -142,18 +224,20 @@ serve(async (req) => {
       .single();
 
     if (error) {
-      console.error("[submit-form-entry] Insert error:", error);
+      console.error("[submit-form-entry] Insert failed");
       return new Response(
-        JSON.stringify({ error: "Insert failed" }),
+        JSON.stringify({ error: "Submission failed" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500 }
       );
     }
 
+    console.log("[submit-form-entry] Success", { id: sanitizeForLog(data.id) });
+
     // Send registration confirmation email only for NON-donors
     // Donors will receive their combined email after payment success
     if (!body.wants_to_donate) {
-      sendRegistrationEmail(body.full_name, body.email).catch(err => {
-        console.error("[submit-form-entry] Email sending failed but continuing:", err);
+      sendRegistrationEmail(body.full_name, body.email).catch(() => {
+        console.error("[submit-form-entry] Email send failed but continuing");
       });
     }
 
@@ -162,9 +246,9 @@ serve(async (req) => {
       status: 200,
     });
   } catch (err) {
-    console.error("[submit-form-entry] Unexpected error:", err);
+    console.error("[submit-form-entry] Unexpected error");
     return new Response(
-      JSON.stringify({ error: "Unexpected error" }),
+      JSON.stringify({ error: "Submission failed" }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500 }
     );
   }

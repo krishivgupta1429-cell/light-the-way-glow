@@ -2,15 +2,40 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@18.5.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.2";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+// Allowed origins for CORS
+const allowedOrigins = [
+  "https://menorah.jewishtc.org",
+  "https://light-the-way-glow.lovable.app"
+];
+
+function getCorsHeaders(origin: string | null): Record<string, string> {
+  const allowedOrigin = origin && allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
+  return {
+    "Access-Control-Allow-Origin": allowedOrigin,
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  };
+}
+
+// Sanitize sensitive data for logging
+function sanitizeForLog(value: string | null | undefined, showChars: number = 4): string {
+  if (!value) return "[empty]";
+  if (value.length <= showChars * 2) return "[redacted]";
+  return `${value.substring(0, showChars)}...${value.substring(value.length - showChars)}`;
+}
 
 // Helper logging function
-const logStep = (step: string, details?: any) => {
-  const detailsStr = details ? ` - ${JSON.stringify(details)}` : '';
-  console.log(`[VERIFY-PAYMENT-LIVE] ${step}${detailsStr}`);
+const logStep = (step: string, details?: Record<string, unknown>) => {
+  const sanitized: Record<string, unknown> = {};
+  if (details) {
+    for (const [key, value] of Object.entries(details)) {
+      if (typeof value === "string" && (key.includes("Id") || key.includes("email") || key.includes("session"))) {
+        sanitized[key] = sanitizeForLog(value, 8);
+      } else {
+        sanitized[key] = value;
+      }
+    }
+  }
+  console.log(`[verify-payment] ${step}`, sanitized);
 };
 
 // Send combined confirmation + donation receipt email via Brevo API
@@ -63,7 +88,7 @@ async function sendDonorConfirmationEmail(
     
     // Date and transaction reference
     bullets.push(`• ${formattedDate}`);
-    bullets.push(`• Ref: ${donationData.transactionId}`);
+    bullets.push(`• Ref: ${sanitizeForLog(donationData.transactionId, 8)}`);
 
     const htmlContent = `Dear ${fullName},<br/><br/>
       Thank you for signing up for Menorah in the Square. We're delighted that you'll be joining us as our community gathers to celebrate the light and joy of Chanukah together.<br/><br/>
@@ -97,7 +122,7 @@ async function sendDonorConfirmationEmail(
       htmlContent,
     };
 
-    console.log(`[donor-confirmation-email] Attempting to send to ${email}...`);
+    logStep("Sending donor email", { email: sanitizeForLog(email) });
 
     const response = await fetch("https://api.brevo.com/v3/smtp/email", {
       method: "POST",
@@ -109,18 +134,20 @@ async function sendDonorConfirmationEmail(
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Brevo API error: ${response.status} - ${errorText}`);
+      throw new Error(`Email API error: ${response.status}`);
     }
     
-    console.log(`[donor-confirmation-email] Sent successfully to ${email}`);
+    logStep("Donor email sent successfully");
   } catch (error) {
-    console.error(`[donor-confirmation-email] Error: ${error}`);
+    logStep("Donor email failed");
     // Don't throw - we don't want email failures to block payment verification
   }
 }
 
 serve(async (req) => {
+  const origin = req.headers.get("origin");
+  const corsHeaders = getCorsHeaders(origin);
+
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -128,20 +155,24 @@ serve(async (req) => {
   try {
     const { session_id } = await req.json();
 
-    logStep("Starting payment verification", { sessionId: session_id });
+    logStep("Starting verification", { sessionId: session_id });
 
     if (!session_id) {
-      logStep("ERROR: Missing session_id parameter");
-      throw new Error("Missing session_id parameter");
+      logStep("Missing session_id");
+      return new Response(
+        JSON.stringify({ error: "Missing session_id parameter" }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+      );
     }
 
     const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
     if (!stripeKey) {
-      logStep("ERROR: STRIPE_SECRET_KEY not configured");
-      throw new Error("Stripe not configured");
+      logStep("Configuration error");
+      return new Response(
+        JSON.stringify({ error: "Service temporarily unavailable" }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500 }
+      );
     }
-
-    logStep("Using LIVE mode Stripe key");
 
     const stripe = new Stripe(stripeKey, {
       apiVersion: "2025-08-27.basil",
@@ -149,12 +180,9 @@ serve(async (req) => {
 
     // Retrieve the checkout session from Stripe
     const session = await stripe.checkout.sessions.retrieve(session_id);
-    logStep("Retrieved session from Stripe", {
-      id: session.id,
+    logStep("Session retrieved", {
       payment_status: session.payment_status,
       status: session.status,
-      amount_total: session.amount_total,
-      livemode: session.livemode,
     });
 
     // Initialize Supabase admin client
@@ -171,26 +199,29 @@ serve(async (req) => {
       .maybeSingle();
 
     if (findError) {
-      logStep("ERROR: Failed to find form submission", { error: findError });
-      throw findError;
+      logStep("Find submission failed");
+      return new Response(
+        JSON.stringify({ error: "Verification failed" }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500 }
+      );
     }
 
     if (!submission) {
-      logStep("ERROR: No form submission found", { sessionId: session_id });
-      throw new Error("Form submission not found");
+      logStep("Submission not found");
+      return new Response(
+        JSON.stringify({ error: "Form submission not found" }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 404 }
+      );
     }
 
-    logStep("Found form submission", { 
-      submissionId: submission.id,
+    logStep("Found submission", { 
       wantsToDonate: submission.wants_to_donate,
       currentStatus: submission.payment_status
     });
 
     // Only update if wants_to_donate is true
     if (!submission.wants_to_donate) {
-      logStep("Submission does not want to donate, skipping update", { 
-        submissionId: submission.id 
-      });
+      logStep("No donation requested");
       return new Response(
         JSON.stringify({
           payment_status: "none",
@@ -211,13 +242,9 @@ serve(async (req) => {
           session.payment_intent as string
         );
         paymentIntentId = paymentIntent.id;
-        logStep("Payment intent retrieved", { 
-          paymentIntentId, 
-          status: paymentIntent.status 
-        });
+        logStep("Payment intent retrieved", { status: paymentIntent.status });
       } catch (err) {
-        const error = err instanceof Error ? err.message : String(err);
-        logStep("ERROR: Failed to retrieve payment intent", { error });
+        logStep("Payment intent retrieval failed");
       }
     }
 
@@ -231,12 +258,7 @@ serve(async (req) => {
 
     const amountInCents = session.amount_total || 0;
 
-    logStep("Preparing to update form submission", {
-      submissionId: submission.id,
-      paymentStatus,
-      amountInCents,
-      paymentIntentId,
-    });
+    logStep("Updating submission", { paymentStatus, amountInCents });
 
     // Update the form submission
     const { error: updateError } = await supabaseAdmin
@@ -251,24 +273,18 @@ serve(async (req) => {
       .eq("id", submission.id);
 
     if (updateError) {
-      logStep("ERROR: Failed to update form submission", { 
-        submissionId: submission.id,
-        error: updateError 
-      });
-      throw updateError;
+      logStep("Update failed");
+      return new Response(
+        JSON.stringify({ error: "Verification failed" }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500 }
+      );
     }
 
-    logStep("Successfully updated form submission", { 
-      submissionId: submission.id,
-      paymentStatus 
-    });
+    logStep("Success", { paymentStatus });
 
     // Send combined confirmation + donation receipt email if payment was successful
     if (paymentStatus === "success") {
-      logStep("Payment successful, sending combined donor confirmation email", {
-        email: submission.email,
-        amount: amountInCents
-      });
+      logStep("Sending donor confirmation email");
       
       sendDonorConfirmationEmail(
         submission.full_name,
@@ -280,8 +296,8 @@ serve(async (req) => {
           donationDate: submission.created_at,
           transactionId: paymentIntentId || session_id,
         }
-      ).catch(err => {
-        logStep("ERROR: Donor confirmation email failed but continuing", { error: err });
+      ).catch(() => {
+        logStep("Donor email failed but continuing");
       });
     }
 
@@ -298,12 +314,9 @@ serve(async (req) => {
       }
     );
   } catch (error) {
-    logStep("ERROR: Payment verification failed", { 
-      error: error instanceof Error ? error.message : "Unknown error",
-      stack: error instanceof Error ? error.stack : undefined
-    });
+    logStep("Verification failed");
     return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }),
+      JSON.stringify({ error: "Payment verification failed" }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 500,

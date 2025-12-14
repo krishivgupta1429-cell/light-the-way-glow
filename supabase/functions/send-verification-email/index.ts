@@ -1,9 +1,25 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+// Allowed origins for CORS
+const allowedOrigins = [
+  "https://menorah.jewishtc.org",
+  "https://light-the-way-glow.lovable.app"
+];
+
+function getCorsHeaders(origin: string | null): Record<string, string> {
+  const allowedOrigin = origin && allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
+  return {
+    "Access-Control-Allow-Origin": allowedOrigin,
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  };
+}
+
+// Sanitize sensitive data for logging
+function sanitizeForLog(value: string | null | undefined, showChars: number = 4): string {
+  if (!value) return "[empty]";
+  if (value.length <= showChars * 2) return "[redacted]";
+  return `${value.substring(0, showChars)}...${value.substring(value.length - showChars)}`;
+}
 
 interface VerificationEmailRequest {
   email: string;
@@ -12,6 +28,9 @@ interface VerificationEmailRequest {
 }
 
 serve(async (req) => {
+  const origin = req.headers.get("origin");
+  const corsHeaders = getCorsHeaders(origin);
+
   // Handle CORS preflight requests
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -24,51 +43,32 @@ serve(async (req) => {
       throw new Error("Missing required fields: email, name, or token");
     }
 
-    const verificationUrl = `${req.headers.get("origin") || "https://light-the-way-glow.lovable.app"}/verify-email?token=${token}`;
+    const verificationUrl = `${origin || "https://menorah.jewishtc.org"}/verify-email?token=${token}`;
 
-    // For now, log the verification URL (in production, integrate with email service)
-    console.log("Verification email requested for:", email);
-    console.log("Verification URL:", verificationUrl);
-    console.log("Name:", name);
-
-    // TODO: Integrate with email service provider (e.g., Resend, SendGrid)
-    // Example with Resend:
-    // const resendApiKey = Deno.env.get("RESEND_API_KEY");
-    // const { Resend } = await import("npm:resend@2.0.0");
-    // const resend = new Resend(resendApiKey);
-    // 
-    // await resend.emails.send({
-    //   from: "Menorah in the Square <noreply@yourdomain.com>",
-    //   to: [email],
-    //   subject: "Confirm your email for Menorah in the Square",
-    //   html: `
-    //     <h1>Thank you for registering, ${name}!</h1>
-    //     <p>Please confirm your email address by clicking the button below:</p>
-    //     <a href="${verificationUrl}" style="display:inline-block;padding:12px 24px;background:#FFD700;color:#000;text-decoration:none;border-radius:6px;font-weight:bold;">Confirm Email</a>
-    //     <p>Or copy and paste this link into your browser:</p>
-    //     <p>${verificationUrl}</p>
-    //     <p>This link will expire in 24 hours.</p>
-    //   `,
-    // });
+    // Log with sanitized data - no sensitive tokens or full emails
+    console.log("[send-verification-email] Request received", {
+      email: sanitizeForLog(email),
+      name: name.split(" ")[0], // Only first name
+      hasToken: !!token,
+    });
 
     return new Response(
       JSON.stringify({ 
         success: true,
-        message: "Verification email sent successfully",
-        // Include verification URL in response for testing/development
-        verificationUrl: verificationUrl,
+        message: "Verification email processed",
       }),
       {
         status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       }
     );
-  } catch (error: any) {
-    console.error("Error in send-verification-email function:", error);
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    console.error("[send-verification-email] Error:", sanitizeForLog(errorMessage, 20));
     return new Response(
       JSON.stringify({ 
         success: false,
-        error: error.message 
+        error: "Request processing failed"
       }),
       {
         status: 500,

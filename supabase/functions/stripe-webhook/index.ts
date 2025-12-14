@@ -2,17 +2,33 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@18.5.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.2";
 
-// Helper logging function
-const logStep = (step: string, details?: any) => {
-  const detailsStr = details ? ` - ${JSON.stringify(details)}` : '';
-  console.log(`[STRIPE-WEBHOOK-LIVE] ${step}${detailsStr}`);
+// Sanitize sensitive data for logging
+function sanitizeForLog(value: string | null | undefined, showChars: number = 4): string {
+  if (!value) return "[empty]";
+  if (value.length <= showChars * 2) return "[redacted]";
+  return `${value.substring(0, showChars)}...${value.substring(value.length - showChars)}`;
+}
+
+// Helper logging function with sanitization
+const logStep = (step: string, details?: Record<string, unknown>) => {
+  const sanitized: Record<string, unknown> = {};
+  if (details) {
+    for (const [key, value] of Object.entries(details)) {
+      if (typeof value === "string" && (key.includes("Id") || key.includes("email") || key.includes("session") || key.includes("intent"))) {
+        sanitized[key] = sanitizeForLog(value, 8);
+      } else {
+        sanitized[key] = value;
+      }
+    }
+  }
+  console.log(`[stripe-webhook] ${step}`, sanitized);
 };
 
 serve(async (req) => {
   const signature = req.headers.get("stripe-signature");
 
   if (!signature) {
-    logStep("ERROR: No signature provided");
+    logStep("No signature provided");
     return new Response(JSON.stringify({ error: "No signature" }), {
       status: 400,
     });
@@ -24,16 +40,11 @@ serve(async (req) => {
     const webhookSecret = Deno.env.get("STRIPE_WEBHOOK_SECRET");
     
     if (!stripeKey || !webhookSecret) {
-      logStep("ERROR: Missing required environment variables", { 
-        hasStripeKey: !!stripeKey, 
-        hasWebhookSecret: !!webhookSecret 
-      });
+      logStep("Configuration error");
       return new Response(JSON.stringify({ error: "Server configuration error" }), {
         status: 500,
       });
     }
-
-    logStep("Environment variables verified - Using LIVE mode keys");
 
     const stripe = new Stripe(stripeKey, {
       apiVersion: "2025-08-27.basil",
@@ -41,25 +52,22 @@ serve(async (req) => {
 
     const body = await req.text();
     
-    logStep("Webhook signature verification starting");
-    
     let event;
     try {
       event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
-      logStep("Webhook signature verified successfully", { eventType: event.type });
+      logStep("Signature verified", { eventType: event.type });
     } catch (err) {
-      const error = err instanceof Error ? err.message : String(err);
-      logStep("ERROR: Webhook signature verification failed", { error });
+      logStep("Signature verification failed");
       return new Response(JSON.stringify({ error: "Invalid signature" }), {
         status: 400,
       });
     }
 
-    logStep("Webhook event received", { type: event.type, id: event.id, livemode: event.livemode });
+    logStep("Event received", { type: event.type, livemode: event.livemode });
 
     // Verify this is a live mode event
     if (!event.livemode) {
-      logStep("WARNING: Received test mode event in production", { eventId: event.id });
+      logStep("Warning: test mode event received");
     }
 
     // Initialize Supabase client with service role key
@@ -71,17 +79,15 @@ serve(async (req) => {
     if (event.type === "checkout.session.completed") {
       const session = event.data.object as Stripe.Checkout.Session;
       
-      logStep("Checkout session completed", { 
-        sessionId: session.id, 
+      logStep("Checkout completed", { 
         paymentStatus: session.payment_status,
         amountTotal: session.amount_total,
-        livemode: session.livemode
       });
 
       const formSubmissionId = session.metadata?.form_submission_id;
       
       if (!formSubmissionId) {
-        logStep("ERROR: No form_submission_id in metadata", { sessionId: session.id });
+        logStep("No form_submission_id in metadata");
         return new Response(JSON.stringify({ error: "No form_submission_id" }), {
           status: 400,
         });
@@ -95,10 +101,9 @@ serve(async (req) => {
             session.payment_intent as string
           );
           paymentIntentId = paymentIntent.id;
-          logStep("Payment intent retrieved", { paymentIntentId, status: paymentIntent.status });
+          logStep("Payment intent retrieved", { status: paymentIntent.status });
         } catch (err) {
-          const error = err instanceof Error ? err.message : String(err);
-          logStep("ERROR: Failed to retrieve payment intent", { error });
+          logStep("Payment intent retrieval failed");
         }
       }
 
@@ -112,12 +117,7 @@ serve(async (req) => {
         paymentStatus = "failed";
       }
 
-      logStep("Updating form_submissions", { 
-        formSubmissionId, 
-        paymentStatus,
-        amountInCents,
-        paymentIntentId
-      });
+      logStep("Updating submission", { paymentStatus, amountInCents });
 
       // Update form submission with payment success and Stripe details
       const { error: updateError } = await supabaseAdmin
@@ -133,24 +133,17 @@ serve(async (req) => {
         .eq("id", formSubmissionId);
 
       if (updateError) {
-        logStep("ERROR: Failed to update form_submissions", { error: updateError });
+        logStep("Update failed");
         throw updateError;
       }
 
-      logStep("Form submission updated successfully", { 
-        formSubmissionId, 
-        status: paymentStatus 
-      });
+      logStep("Submission updated", { status: paymentStatus });
     }
 
     if (event.type === "payment_intent.succeeded") {
       const paymentIntent = event.data.object as Stripe.PaymentIntent;
       
-      logStep("Payment intent succeeded", { 
-        paymentIntentId: paymentIntent.id, 
-        amount: paymentIntent.amount,
-        livemode: paymentIntent.livemode
-      });
+      logStep("Payment intent succeeded", { amount: paymentIntent.amount });
 
       // Find the form submission by payment intent ID
       const { data: submission, error: findError } = await supabaseAdmin
@@ -160,15 +153,9 @@ serve(async (req) => {
         .maybeSingle();
 
       if (findError) {
-        logStep("ERROR: Failed to find form submission", { 
-          paymentIntentId: paymentIntent.id, 
-          error: findError 
-        });
+        logStep("Find submission failed");
       } else if (submission) {
-        logStep("Found form submission for payment intent", { 
-          submissionId: submission.id,
-          currentStatus: submission.payment_status
-        });
+        logStep("Found submission", { currentStatus: submission.payment_status });
 
         const { error: updateError } = await supabaseAdmin
           .from("form_submissions")
@@ -180,28 +167,19 @@ serve(async (req) => {
           .eq("id", submission.id);
 
         if (updateError) {
-          logStep("ERROR: Failed to update payment status to success", { 
-            submissionId: submission.id, 
-            error: updateError 
-          });
+          logStep("Update failed");
         } else {
-          logStep("Payment status updated to success", { submissionId: submission.id });
+          logStep("Payment status updated to success");
         }
       } else {
-        logStep("WARNING: No submission found for payment intent", { 
-          paymentIntentId: paymentIntent.id 
-        });
+        logStep("No submission found for payment intent");
       }
     }
 
     if (event.type === "payment_intent.payment_failed") {
       const paymentIntent = event.data.object as Stripe.PaymentIntent;
       
-      logStep("Payment intent failed", { 
-        paymentIntentId: paymentIntent.id,
-        failureMessage: paymentIntent.last_payment_error?.message,
-        livemode: paymentIntent.livemode
-      });
+      logStep("Payment intent failed");
 
       // Find the form submission by payment intent ID
       const { data: submission, error: findError } = await supabaseAdmin
@@ -211,15 +189,9 @@ serve(async (req) => {
         .maybeSingle();
 
       if (findError) {
-        logStep("ERROR: Failed to find form submission", { 
-          paymentIntentId: paymentIntent.id, 
-          error: findError 
-        });
+        logStep("Find submission failed");
       } else if (submission) {
-        logStep("Found form submission for failed payment", { 
-          submissionId: submission.id,
-          currentStatus: submission.payment_status
-        });
+        logStep("Found submission for failed payment");
 
         const { error: updateError } = await supabaseAdmin
           .from("form_submissions")
@@ -229,32 +201,24 @@ serve(async (req) => {
           .eq("id", submission.id);
 
         if (updateError) {
-          logStep("ERROR: Failed to update payment status to failed", { 
-            submissionId: submission.id, 
-            error: updateError 
-          });
+          logStep("Update failed");
         } else {
-          logStep("Payment status updated to failed", { submissionId: submission.id });
+          logStep("Payment status updated to failed");
         }
       } else {
-        logStep("WARNING: No submission found for failed payment intent", { 
-          paymentIntentId: paymentIntent.id 
-        });
+        logStep("No submission found for failed payment intent");
       }
     }
 
-    logStep("Webhook processed successfully", { eventType: event.type, eventId: event.id });
+    logStep("Webhook processed", { eventType: event.type });
 
     return new Response(JSON.stringify({ received: true }), {
       status: 200,
     });
   } catch (error) {
-    logStep("ERROR: Webhook processing failed", { 
-      error: error instanceof Error ? error.message : "Unknown error",
-      stack: error instanceof Error ? error.stack : undefined
-    });
+    logStep("Webhook processing failed");
     return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }),
+      JSON.stringify({ error: "Webhook processing failed" }),
       {
         status: 400,
       }
