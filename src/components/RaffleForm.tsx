@@ -617,13 +617,8 @@ const RaffleForm = () => {
 
         {/* Support */}
         <div className="space-y-4">
-          {/* Intro line */}
-          <p className="text-foreground font-medium text-base text-left">
-            This free community event is made possible by generous donors like you. Please consider supporting and being part of this beautiful celebration — your contribution will also make you a part of the Lamplighter Wall.
-          </p>
-          
           {/* Informational card - Help Build a Menorah */}
-          <div className="space-y-4 bg-gradient-to-br from-purple-900/20 via-purple-800/15 to-gold/10 p-6 rounded-xl border border-purple-500/30 backdrop-blur-sm relative overflow-hidden mt-4 pt-4 border-t border-gold/20">
+          <div className="space-y-4 bg-gradient-to-br from-purple-900/20 via-purple-800/15 to-gold/10 p-6 rounded-xl border border-purple-500/30 backdrop-blur-sm relative overflow-hidden">
             {/* Subtle glow effect with purple accent */}
             <div className="absolute inset-0 bg-gradient-to-br from-purple-600/10 via-transparent to-gold/5 pointer-events-none" />
             {/* Header bar effect */}
@@ -707,6 +702,11 @@ const RaffleForm = () => {
               value={cansAmountUsd.toFixed(2)}
             />
           </div>
+          
+          {/* Free community event paragraph */}
+          <p className="text-foreground font-medium text-base text-left mt-4 pt-4 border-t border-gold/20">
+            This free community event is made possible by generous donors like you. Please consider supporting and being part of this beautiful celebration — your contribution will also make you a part of the Lamplighter Wall.
+          </p>
           
           {/* Sponsorship Section */}
           <div 
