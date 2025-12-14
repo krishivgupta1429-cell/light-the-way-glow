@@ -283,10 +283,13 @@ const RaffleForm = () => {
     setIsSubmitting(true);
 
     try {
-      // Check if user has sponsorships (wants to donate)
-      const hasSponsorships = formData.sponsorships.length > 0 || formData.cansQuantity !== "";
+      // Calculate total payment amount
+      const totalAmount = sponsorshipTotal + cansAmountUsd;
       
-      if (hasSponsorships) {
+      // Only process payment if there's actually an amount to pay
+      const hasPayment = totalAmount > 0;
+      
+      if (hasPayment) {
         // STRIPE PAYMENT FLOW
         // First, save form submission to get an ID
         const response = await submitEntry({
@@ -311,8 +314,7 @@ const RaffleForm = () => {
           return;
         }
 
-        // Calculate total amount
-        const totalAmount = sponsorshipTotal + cansAmountUsd;
+        // Use already calculated totalAmount
 
         // Create Stripe checkout session
         const { data: checkoutData, error: checkoutError } = await supabase.functions.invoke(
@@ -846,7 +848,7 @@ const RaffleForm = () => {
           <span className="relative z-10">
             {isSubmitting 
               ? "Processing..." 
-              : (formData.sponsorships.length > 0 || formData.cansQuantity !== "") 
+              : (sponsorshipTotal + cansAmountUsd) > 0
                 ? "Pay Now" 
                 : "Submit Entry"
             }
