@@ -622,6 +622,61 @@ const RaffleForm = () => {
             This free community event is made possible by generous donors like you. Please consider supporting and being part of this beautiful celebration — your contribution will also make you a part of the Lamplighter Wall.
           </p>
           
+          {/* Can Quantity Selector - moved here */}
+          <div className="space-y-3 mt-4 pt-4 border-t border-gold/20">
+            <div className="relative">
+              <Label 
+                htmlFor="cansQuantity" 
+                className="text-foreground font-bold text-lg md:text-xl block relative pb-2"
+              >
+                <span className="relative z-10 drop-shadow-[0_0_8px_rgba(255,215,0,0.3)]">How many cans would you like us to shop for you?</span>
+                {/* Golden underline/highlight effect */}
+                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-gold/60 to-transparent opacity-70 animate-pulse" />
+                <span className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-gold to-transparent shadow-[0_0_6px_rgba(255,215,0,0.4)]" />
+              </Label>
+            </div>
+            <Select
+              value={formData.cansQuantity}
+              onValueChange={(value) => setFormData({ ...formData, cansQuantity: value })}
+            >
+              <SelectTrigger
+                id="cansQuantity"
+                aria-label="Select quantity of cans"
+                className="bg-input/80 backdrop-blur-sm border-border/60 text-foreground placeholder:text-foreground/50 focus:border-gold focus:ring-2 focus:ring-gold/40 transition-all duration-300 hover:border-gold/60 hover:shadow-[0_0_15px_rgba(255,215,0,0.2)]"
+              >
+                <SelectValue placeholder="Select quantity" />
+              </SelectTrigger>
+              <SelectContent className="bg-card/95 backdrop-blur-md border-border/60 text-foreground shadow-lg mobile-select-content">
+                {canOptions.map((option) => (
+                  <SelectItem
+                    key={option.quantity}
+                    value={option.label}
+                    className="text-foreground focus:bg-gold/10 focus:text-gold hover:bg-gold/5 cursor-pointer transition-colors"
+                  >
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            
+            {/* Helper line */}
+            <p className="text-xs text-foreground/60 mt-2">
+              We'll purchase and deliver the cans on your behalf for the menorah construction.
+            </p>
+            
+            {/* Hidden inputs for form submission */}
+            <input
+              type="hidden"
+              name="cans_quantity"
+              value={cansQuantity}
+            />
+            <input
+              type="hidden"
+              name="cans_amount_usd"
+              value={cansAmountUsd.toFixed(2)}
+            />
+          </div>
+          
           {/* Sponsorship Section */}
           <div 
             id="sponsorship-section" 
@@ -736,67 +791,6 @@ const RaffleForm = () => {
           </div>
         </div>
 
-        {/* Glowing Divider Separator */}
-        <div className="flex items-center justify-center py-6 md:py-8 my-4 md:my-6">
-          <div className="h-px w-full bg-gradient-to-r from-transparent via-gold/50 to-transparent" />
-          <div className="mx-4 text-2xl animate-candle-flicker">✨</div>
-          <div className="h-px w-full bg-gradient-to-r from-transparent via-gold/50 to-transparent" />
-        </div>
-
-        {/* Can Quantity Selector */}
-        <div className="space-y-3">
-          <div className="relative">
-            <Label 
-              htmlFor="cansQuantity" 
-              className="text-foreground font-bold text-lg md:text-xl block relative pb-2"
-            >
-              <span className="relative z-10 drop-shadow-[0_0_8px_rgba(255,215,0,0.3)]">How many cans would you like us to shop for you?</span>
-              {/* Golden underline/highlight effect */}
-              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-gold/60 to-transparent opacity-70 animate-pulse" />
-              <span className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-gold to-transparent shadow-[0_0_6px_rgba(255,215,0,0.4)]" />
-            </Label>
-          </div>
-          <Select
-            value={formData.cansQuantity}
-            onValueChange={(value) => setFormData({ ...formData, cansQuantity: value })}
-          >
-            <SelectTrigger
-              id="cansQuantity"
-              aria-label="Select quantity of cans"
-              className="bg-input/80 backdrop-blur-sm border-border/60 text-foreground placeholder:text-foreground/50 focus:border-gold focus:ring-2 focus:ring-gold/40 transition-all duration-300 hover:border-gold/60 hover:shadow-[0_0_15px_rgba(255,215,0,0.2)]"
-            >
-              <SelectValue placeholder="Select quantity" />
-            </SelectTrigger>
-            <SelectContent className="bg-card/95 backdrop-blur-md border-border/60 text-foreground shadow-lg mobile-select-content">
-              {canOptions.map((option) => (
-                <SelectItem
-                  key={option.quantity}
-                  value={option.label}
-                  className="text-foreground focus:bg-gold/10 focus:text-gold hover:bg-gold/5 cursor-pointer transition-colors"
-                >
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          
-          {/* Helper line */}
-          <p className="text-xs text-foreground/60 mt-2">
-            We'll purchase and deliver the cans on your behalf for the menorah construction.
-          </p>
-          
-          {/* Hidden inputs for form submission */}
-          <input
-            type="hidden"
-            name="cans_quantity"
-            value={cansQuantity}
-          />
-          <input
-            type="hidden"
-            name="cans_amount_usd"
-            value={cansAmountUsd.toFixed(2)}
-          />
-        </div>
 
         {/* Comments / Special Requests */}
         <div className="space-y-2">
