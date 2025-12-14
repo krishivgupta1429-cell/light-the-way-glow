@@ -622,7 +622,38 @@ const RaffleForm = () => {
             This free community event is made possible by generous donors like you. Please consider supporting and being part of this beautiful celebration — your contribution will also make you a part of the Lamplighter Wall.
           </p>
           
-          {/* Can Quantity Selector - moved here */}
+          {/* Informational card - Help Build a Menorah */}
+          <div className="space-y-4 bg-gradient-to-br from-purple-900/20 via-purple-800/15 to-gold/10 p-6 rounded-xl border border-purple-500/30 backdrop-blur-sm relative overflow-hidden mt-4 pt-4 border-t border-gold/20">
+            {/* Subtle glow effect with purple accent */}
+            <div className="absolute inset-0 bg-gradient-to-br from-purple-600/10 via-transparent to-gold/5 pointer-events-none" />
+            {/* Header bar effect */}
+            <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-purple-500/50 via-purple-400/40 to-gold/30" />
+            <div className="relative z-10 space-y-3">
+              {/* Heading */}
+              <h3 className="text-base font-semibold text-gold leading-tight flex items-center gap-2">
+                <span className="text-lg">🥫</span>
+                <span>Help Build a Menorah Out of Cans and Support Those in Need!</span>
+              </h3>
+              
+              {/* Body content */}
+              <div className="space-y-2 text-sm text-foreground/80 leading-relaxed">
+                <p>
+                  This year, we're building a menorah entirely out of canned food, which will later be donated to local homeless shelters. You can participate in this meaningful project in two ways:
+                </p>
+                <ol className="list-decimal list-inside space-y-1.5 ml-2">
+                  <li>Drop off cans at the Chabad JCC.</li>
+                  <li>Have us do the shopping for you! And simply select how many cans you'd like to contribute. Each can costs an average of $4.</li>
+                </ol>
+              </div>
+              
+              {/* Closing line - smaller, italic */}
+              <p className="text-xs text-foreground/70 italic leading-relaxed">
+                Each can become a building block of hope, turning our celebration into a beacon of giving.
+              </p>
+            </div>
+          </div>
+          
+          {/* Can Quantity Selector */}
           <div className="space-y-3 mt-4 pt-4 border-t border-gold/20">
             <div className="relative">
               <Label 
@@ -751,44 +782,6 @@ const RaffleForm = () => {
                 value={sponsorshipTotal.toFixed(2)}
               />
             </div>
-        </div>
-
-        {/* Separator */}
-        <div className="flex items-center justify-center py-4">
-          <div className="h-px w-full bg-gradient-to-r from-transparent via-gold/40 to-transparent" />
-          <div className="mx-4 text-2xl animate-candle-flicker">✨</div>
-          <div className="h-px w-full bg-gradient-to-r from-transparent via-gold/40 to-transparent" />
-        </div>
-
-        {/* Informational card - static, non-interactive */}
-        <div className="space-y-4 bg-gradient-to-br from-purple-900/20 via-purple-800/15 to-gold/10 p-6 rounded-xl border border-purple-500/30 backdrop-blur-sm relative overflow-hidden">
-          {/* Subtle glow effect with purple accent */}
-          <div className="absolute inset-0 bg-gradient-to-br from-purple-600/10 via-transparent to-gold/5 pointer-events-none" />
-          {/* Header bar effect */}
-          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-purple-500/50 via-purple-400/40 to-gold/30" />
-          <div className="relative z-10 space-y-3">
-            {/* Heading */}
-            <h3 className="text-base font-semibold text-gold leading-tight flex items-center gap-2">
-              <span className="text-lg">🥫</span>
-              <span>Help Build a Menorah Out of Cans and Support Those in Need!</span>
-            </h3>
-            
-            {/* Body content */}
-            <div className="space-y-2 text-sm text-foreground/80 leading-relaxed">
-              <p>
-                This year, we're building a menorah entirely out of canned food, which will later be donated to local homeless shelters. You can participate in this meaningful project in two ways:
-              </p>
-              <ol className="list-decimal list-inside space-y-1.5 ml-2">
-                <li>Drop off cans at the Chabad JCC.</li>
-                <li>Have us do the shopping for you! And simply select how many cans you'd like to contribute. Each can costs an average of $4.</li>
-              </ol>
-            </div>
-            
-            {/* Closing line - smaller, italic */}
-            <p className="text-xs text-foreground/70 italic leading-relaxed">
-              Each can become a building block of hope, turning our celebration into a beacon of giving.
-            </p>
-          </div>
         </div>
 
 
