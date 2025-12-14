@@ -2,18 +2,46 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@18.5.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.2";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+// Allowed origins for CORS
+const allowedOrigins = [
+  "https://menorah.jewishtc.org",
+  "https://light-the-way-glow.lovable.app"
+];
 
-// Helper logging function
-const logStep = (step: string, details?: any) => {
-  const detailsStr = details ? ` - ${JSON.stringify(details)}` : '';
-  console.log(`[CREATE-CHECKOUT-LIVE] ${step}${detailsStr}`);
+function getCorsHeaders(origin: string | null): Record<string, string> {
+  const allowedOrigin = origin && allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
+  return {
+    "Access-Control-Allow-Origin": allowedOrigin,
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  };
+}
+
+// Sanitize sensitive data for logging
+function sanitizeForLog(value: string | null | undefined, showChars: number = 4): string {
+  if (!value) return "[empty]";
+  if (value.length <= showChars * 2) return "[redacted]";
+  return `${value.substring(0, showChars)}...${value.substring(value.length - showChars)}`;
+}
+
+// Helper logging function with sanitization
+const logStep = (step: string, details?: Record<string, unknown>) => {
+  const sanitized: Record<string, unknown> = {};
+  if (details) {
+    for (const [key, value] of Object.entries(details)) {
+      if (typeof value === "string" && (key.includes("Id") || key.includes("email") || key.includes("session"))) {
+        sanitized[key] = sanitizeForLog(value, 8);
+      } else {
+        sanitized[key] = value;
+      }
+    }
+  }
+  console.log(`[checkout] ${step}`, sanitized);
 };
 
 serve(async (req) => {
+  const origin = req.headers.get("origin");
+  const corsHeaders = getCorsHeaders(origin);
+
   // Handle CORS preflight requests
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -25,11 +53,12 @@ serve(async (req) => {
     // Verify Stripe key is available
     const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
     if (!stripeKey) {
-      logStep("ERROR: STRIPE_SECRET_KEY not configured");
-      throw new Error("Stripe not configured");
+      logStep("Configuration error");
+      return new Response(
+        JSON.stringify({ error: "Service temporarily unavailable" }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500 }
+      );
     }
-
-    logStep("Using LIVE mode Stripe key");
 
     const supabaseClient = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
@@ -38,17 +67,23 @@ serve(async (req) => {
 
     const { formSubmissionId, amount, email, fullName } = await req.json();
 
-    logStep("Request data", { formSubmissionId, amount, email, fullName });
+    logStep("Request received", { formSubmissionId, amount, hasEmail: !!email });
 
     if (!formSubmissionId || !amount || !email) {
-      logStep("ERROR: Missing required parameters");
-      throw new Error("Missing required parameters");
+      logStep("Missing parameters");
+      return new Response(
+        JSON.stringify({ error: "Missing required parameters" }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+      );
     }
 
     // Validate amount is positive
     if (amount <= 0) {
-      logStep("ERROR: Invalid amount", { amount });
-      throw new Error("Invalid amount");
+      logStep("Invalid amount", { amount });
+      return new Response(
+        JSON.stringify({ error: "Invalid amount" }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+      );
     }
 
     // Initialize Stripe with live key
@@ -59,7 +94,7 @@ serve(async (req) => {
     // Convert amount to cents
     const amountInCents = Math.round(amount * 100);
 
-    logStep("Creating Stripe checkout session", { amountInCents });
+    logStep("Creating session", { amountInCents });
 
     // Create Stripe checkout session in LIVE mode
     const session = await stripe.checkout.sessions.create({
@@ -78,8 +113,8 @@ serve(async (req) => {
         },
       ],
       mode: "payment",
-      success_url: `${req.headers.get("origin")}/payment-result?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${req.headers.get("origin")}/payment-result?session_id={CHECKOUT_SESSION_ID}&canceled=1`,
+      success_url: `${origin || "https://menorah.jewishtc.org"}/payment-result?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin || "https://menorah.jewishtc.org"}/payment-result?session_id={CHECKOUT_SESSION_ID}&canceled=1`,
       customer_email: email,
       metadata: {
         form_submission_id: formSubmissionId,
@@ -87,19 +122,13 @@ serve(async (req) => {
       },
     });
 
-    logStep("Checkout session created", { 
-      sessionId: session.id, 
-      url: session.url,
-      livemode: session.livemode
-    });
+    logStep("Session created", { hasUrl: !!session.url });
 
     // Immediately update form_submissions with the checkout session ID
     const supabaseAdmin = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
     );
-
-    logStep("Updating form_submissions with session ID", { formSubmissionId });
 
     const { error: updateError } = await supabaseAdmin
       .from("form_submissions")
@@ -111,26 +140,23 @@ serve(async (req) => {
       .eq("id", formSubmissionId);
 
     if (updateError) {
-      logStep("ERROR: Failed to update form_submissions", { error: updateError });
-      throw updateError;
+      logStep("Update failed");
+      return new Response(
+        JSON.stringify({ error: "Failed to process checkout" }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500 }
+      );
     }
 
-    logStep("Successfully updated form_submissions", { 
-      formSubmissionId, 
-      sessionId: session.id 
-    });
+    logStep("Success");
 
     return new Response(JSON.stringify({ url: session.url }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
       status: 200,
     });
   } catch (error) {
-    logStep("ERROR: Failed to create checkout session", { 
-      error: error instanceof Error ? error.message : "Unknown error",
-      stack: error instanceof Error ? error.stack : undefined
-    });
+    logStep("Checkout failed");
     return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }),
+      JSON.stringify({ error: "Checkout session creation failed" }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 500,

@@ -1,12 +1,31 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.2";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+// Allowed origins for CORS
+const allowedOrigins = [
+  "https://menorah.jewishtc.org",
+  "https://light-the-way-glow.lovable.app"
+];
+
+function getCorsHeaders(origin: string | null): Record<string, string> {
+  const allowedOrigin = origin && allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
+  return {
+    "Access-Control-Allow-Origin": allowedOrigin,
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  };
+}
+
+// Sanitize sensitive data for logging
+function sanitizeForLog(value: string | null | undefined, showChars: number = 4): string {
+  if (!value) return "[empty]";
+  if (value.length <= showChars * 2) return "[redacted]";
+  return `${value.substring(0, showChars)}...${value.substring(value.length - showChars)}`;
+}
 
 serve(async (req) => {
+  const origin = req.headers.get("origin");
+  const corsHeaders = getCorsHeaders(origin);
+
   // Handle CORS preflight requests
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -16,10 +35,17 @@ serve(async (req) => {
     const { token } = await req.json();
 
     if (!token) {
-      throw new Error("Verification token is required");
+      return new Response(
+        JSON.stringify({ success: false, error: "Token is required" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
-    // Create Supabase client
+    console.log("[verify-email-token] Verification attempt", { 
+      tokenPrefix: sanitizeForLog(token, 8) 
+    });
+
+    // Create Supabase client with service role
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
@@ -32,7 +58,7 @@ serve(async (req) => {
       .single();
 
     if (findError || !submission) {
-      console.error("Token not found:", findError);
+      console.log("[verify-email-token] Token not found or invalid");
       return new Response(
         JSON.stringify({ 
           success: false,
@@ -53,6 +79,7 @@ serve(async (req) => {
       .single();
 
     if (!currentSubmission?.verification_token) {
+      console.log("[verify-email-token] Already verified");
       return new Response(
         JSON.stringify({ 
           success: true,
@@ -72,6 +99,7 @@ serve(async (req) => {
     const hoursSinceSent = (now.getTime() - sentAt.getTime()) / (1000 * 60 * 60);
 
     if (hoursSinceSent > 24) {
+      console.log("[verify-email-token] Token expired");
       return new Response(
         JSON.stringify({ 
           success: false,
@@ -94,11 +122,16 @@ serve(async (req) => {
       .eq("id", submission.id);
 
     if (updateError) {
-      console.error("Error updating submission:", updateError);
-      throw new Error("Failed to verify email");
+      console.error("[verify-email-token] Update failed");
+      return new Response(
+        JSON.stringify({ success: false, error: "Verification failed" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
-    console.log("Email verified successfully for:", submission.email);
+    console.log("[verify-email-token] Success", { 
+      email: sanitizeForLog(submission.email) 
+    });
 
     return new Response(
       JSON.stringify({ 
@@ -110,12 +143,12 @@ serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       }
     );
-  } catch (error: any) {
-    console.error("Error in verify-email-token function:", error);
+  } catch (error: unknown) {
+    console.error("[verify-email-token] Unexpected error");
     return new Response(
       JSON.stringify({ 
         success: false,
-        error: error.message 
+        error: "Verification failed"
       }),
       {
         status: 500,
