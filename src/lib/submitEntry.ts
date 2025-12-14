@@ -93,10 +93,9 @@ export async function submitEntry(
       { id: "menorah-platinum", label: "MENORAH PLATINUM SPONSOR", amount: 540 },
     ];
 
-    const wantsToDonate = formData.sponsorships.length > 0 || formData.cansQuantity !== "";
-
     // Calculate cans amount
     const canOptions = [
+      { quantity: 0, label: "0 CANS – $0", amount: 0 },
       { quantity: 1, label: "1 CAN – $4", amount: 4 },
       { quantity: 2, label: "2 CAN – $8", amount: 8 },
       { quantity: 4, label: "4 CANS – $16", amount: 16 },
@@ -115,6 +114,17 @@ export async function submitEntry(
       (option) => option.label === formData.cansQuantity
     );
     const cansQuantityValue = selectedCanOption?.quantity || 0;
+    const cansAmountValue = selectedCanOption?.amount || 0;
+
+    // Calculate total sponsorship amount
+    const sponsorshipTotal = formData.sponsorships.reduce((total, sponsorId) => {
+      const option = sponsorshipOptions.find((o) => o.id === sponsorId);
+      return total + (option?.amount || 0);
+    }, 0);
+
+    // Only mark as donor if there's an actual payment amount > 0
+    const totalPaymentAmount = sponsorshipTotal + cansAmountValue;
+    const wantsToDonate = totalPaymentAmount > 0;
 
     // Generate verification token
     const verificationToken = generateVerificationToken();
