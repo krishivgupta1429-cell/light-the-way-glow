@@ -100,11 +100,6 @@ async function sendDonorConfirmationEmail(
       This annual celebration has become a cherished moment of unity in our city—filled with warmth, music, doughnuts, and the glow of the menorah. We look forward to sharing this uplifting evening with you.<br/><br/>
       To help spread the light even further, we warmly invite you to share the sign-up link with five friends:<br/>
       👉 <a href="https://menorah.jewishtc.org/">https://menorah.jewishtc.org/</a><br/><br/>
-      <strong>Congratulations!!</strong><br/>
-      You are among the first 100 sign-ups.<br/>
-      Please present this email upon arrival to receive your complimentary beanie before 5:05 PM.<br/><br/>
-      To see the Lamplighter Wall, visit:<br/>
-      <a href="https://www.jewishtc.org/templates/articlecco_cdo/aid/7109138/jewish/Untitled.htm">https://www.jewishtc.org/templates/articlecco_cdo/aid/7109138/jewish/Untitled.htm</a><br/>
       If you prefer to remain anonymous on the Lamplighter Donor Wall, simply reply to this email and let us know—we're happy to list your gift anonymously.<br/><br/>
       ⸻<br/><br/>
       <strong>Donation Acknowledgment</strong><br/><br/>
@@ -112,7 +107,9 @@ async function sendDonorConfirmationEmail(
       <strong>Donation Details</strong><br/>
       ${bullets.join("<br/>")}<br/><br/>
       Your partnership makes a heartfelt difference. Thank you for helping illuminate our community with kindness.<br/><br/>
-      ⸻`;
+      <strong>P.S.</strong><br/>
+      View the Lamplighter Wall:<br/>
+      <a href="https://www.jewishtc.org/templates/articlecco_cdo/aid/7109138/jewish/Untitled.htm">https://www.jewishtc.org/templates/articlecco_cdo/aid/7109138/jewish/Untitled.htm</a>`;
 
     const payload = {
       sender: { name: "Rabbi Laibel Shemtov", email: "rabbi@jewishtc.org" },
