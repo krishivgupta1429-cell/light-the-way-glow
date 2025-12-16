@@ -109,11 +109,8 @@ async function sendRegistrationEmail(fullName: string, email: string): Promise<v
       Rabbi Laibel & Chaya Shemtov<br/>
       Chabad Jewish Center of Traverse City<br/>
       <a href="https://JewishTC.org">JewishTC.org</a><br/><br/>
-      <strong>P.S.</strong> Congratulations on being among the first 100 sign-ups!<br/>
-      Please show this email when you arrive to receive your free beanie.<br/>
-      Be sure to show it before 5:05 PM—after that time, we'll begin giving them out to everyone.<br/><br/>
-      <strong>P.S.s</strong><br/>
-      View the lamplighter wall:<br/>
+      <strong>P.S.</strong><br/>
+      View the Lamplighter Wall:<br/>
       <a href="https://www.jewishtc.org/templates/articlecco_cdo/aid/7109138/jewish/Untitled.htm">https://www.jewishtc.org/templates/articlecco_cdo/aid/7109138/jewish/Untitled.htm</a>`;
 
     const payload = {
